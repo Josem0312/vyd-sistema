@@ -1,0 +1,35 @@
+# Borra la rama de un Pull Request cuando el PR se cierra, ya sea fusionado o descartado.
+# - Solo ramas del propio repositorio (no forks) y nunca la rama por defecto.
+# - No borra si otro PR abierto usa esa rama como origen o como destino.
+# - Una rama borrada tras cerrar sin fusionar se puede restaurar desde la pagina del PR
+#   ("Restore branch"), y sus commits siguen en refs/pull/<numero>/head.
+name: Borrar rama del PR al cerrarse
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  borrar-rama:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Borrar la rama del PR si nada mas la usa
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RAMA: ${{ github.event.pull_request.head.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          origen=$(gh pr list --repo "$REPO" --head "$RAMA" --state open --json number --jq 'length')
+          destino=$(gh pr list --repo "$REPO" --base "$RAMA" --state open --json number --jq 'length')
+          if [ "$origen" != "0" ] || [ "$destino" != "0" ]; then
+            echo "La rama $RAMA aun la usa otro PR abierto; no se borra."
+            exit 0
+          fi
+          gh api -X DELETE "repos/$REPO/git/refs/heads/$RAMA" && echo "Rama $RAMA borrada." || echo "La rama $RAMA ya no existia."
